@@ -47,7 +47,7 @@ def run_factory():
         print(f"\n[#] UNIT {device_id} STARTING...")
         
         # 1. Buy Number
-        order_id, phone = get_5sim_number(country='usa') # Change 'usa' to 'india' or 'russia' for cheaper
+        order_id, phone = get_5sim_number(country='philippines') # Change 'usa' to 'india' or 'russia' for cheaper
         if not phone:
             continue
             
