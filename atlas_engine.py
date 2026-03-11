@@ -4,48 +4,75 @@ import subprocess
 import random
 
 # --- CONFIGURATION ---
-API_KEY = eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE4MDQ3MjU5NjIsImlhdCI6MTc3MzE4OTk2MiwicmF5IjoiZDc5ZTk1MDI2M2M2YmRlNGU5NmI2ZjBjNWYyNDA5NzIiLCJzdWIiOjM4NjM3ODh9.KxKXWR01OfQBRrIHFzQU5OCxeB8XkiFid1gzZ_nNE_byiJrbUAAnr6rWV47AmpuBbGhYpke-kOsSsJit4716KeRtAd7U_uNtS-z9EfSjUEx2xh0hZ9txF5gkKqO2Tb91jghQhMUaZg1yZM0w6wid68Kdpdp2gF3zxOow_AvY3ONNm47S4YKtL4kHFQgx-z_2qmUXJDV5YcFCPJrcll7RKP9fRUT5toSKTBY4wcIciuKOQx8qNRQKviTcYHpE7Cikj2SsS8Dj1UbXEOEZOpYaiUl56tn9So_rZYB7jm-xUKh-0WTH2UB1kg2_c9wCTrF7v45Y76Kcgu2F0PNo7I_XxQ
+API_TOKEN = eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE4MDQ3MjU5NjIsImlhdCI6MTc3MzE4OTk2MiwicmF5IjoiZDc5ZTk1MDI2M2M2YmRlNGU5NmI2ZjBjNWYyNDA5NzIiLCJzdWIiOjM4NjM3ODh9.KxKXWR01OfQBRrIHFzQU5OCxeB8XkiFid1gzZ_nNE_byiJrbUAAnr6rWV47AmpuBbGhYpke-kOsSsJit4716KeRtAd7U_uNtS-z9EfSjUEx2xh0hZ9txF5gkKqO2Tb91jghQhMUaZg1yZM0w6wid68Kdpdp2gF3zxOow_AvY3ONNm47S4YKtL4kHFQgx-z_2qmUXJDV5YcFCPJrcll7RKP9fRUT5toSKTBY4wcIciuKOQx8qNRQKviTcYHpE7Cikj2SsS8Dj1UbXEOEZOpYaiUl56tn9So_rZYB7jm-xUKh-0WTH2UB1kg2_c9wCTrF7v45Y76Kcgu2F0PNo7I_XxQ
 ADB_PATH = "adb"
-# Default LDPlayer ports (5554, 5556, etc.)
-PORTS = ["5554", "5556", "5558"] 
+PORTS = ["5554", "5556", "5558"] # Add more as you open more LDPlayers
 
-def adb_type(device_id, text):
-    subprocess.run([ADB_PATH, "-s", device_id, "shell", "input", "text", text])
+HEADERS = {
+    'Authorization': 'Bearer ' + API_TOKEN,
+    'Accept': 'application/json',
+}
 
-def get_tg_number():
-    """Requests a Telegram number from the API."""
-    url = f"https://api.sms-activate.org/storio/v2/get_number?api_key={API_KEY}&service=tg&country=0" # 0 is generic/cheap
-    res = requests.get(url).json()
-    if res.get('status') == 'SUCCESS':
-        return res['id'], res['number']
-    return None, None
+def get_5sim_number(country='usa', operator='any'):
+    """Orders a Telegram number from 5sim."""
+    url = f"https://5sim.net/v1/user/buy/activation/{country}/{operator}/telegram"
+    try:
+        res = requests.get(url, headers=HEADERS).json()
+        return res['id'], res['phone']
+    except Exception as e:
+        print(f"[-] 5sim Error: {e}")
+        return None, None
 
-def get_sms_code(activation_id):
-    """Polls the API for the 5-digit Telegram code."""
-    print("[*] Waiting for SMS (this can take 2-5 minutes)...")
-    for _ in range(30):
-        url = f"https://api.sms-activate.org/storio/v2/get_status?api_key={API_KEY}&id={activation_id}"
-        res = requests.get(url).json()
-        if res.get('status') == 'STATUS_OK':
-            return res['code']
+def check_5sim_sms(order_id):
+    """Polls 5sim for the 5-digit code."""
+    print("[*] Waiting for SMS (Max 5 mins)...")
+    for _ in range(30): # 30 attempts, 10 seconds apart
+        url = f"https://5sim.net/v1/user/check/{order_id}"
+        res = requests.get(url, headers=HEADERS).json()
+        
+        # 5sim returns a list of SMS objects
+        if res.get('sms') and len(res['sms']) > 0:
+            return res['sms'][0]['code']
+        
+        # If the order is cancelled or timed out
+        if res.get('status') in ['CANCELED', 'TIMEOUT', 'FINISHED']:
+            return None
+            
         time.sleep(10)
     return None
 
 def run_factory():
     for port in PORTS:
         device_id = f"127.0.0.1:{port}"
-        print(f"\n[#] UNIT {device_id} ACTIVE")
+        print(f"\n[#] UNIT {device_id} STARTING...")
         
-        # 1. Get Number
-        act_id, phone = get_tg_number()
+        # 1. Buy Number
+        order_id, phone = get_5sim_number(country='usa') # Change 'usa' to 'india' or 'russia' for cheaper
         if not phone:
-            print("[-] Out of stock or API error.")
             continue
             
-        print(f"[+] Assigned Number: {phone}")
+        print(f"[+] Number Acquired: {phone}")
         
-        # 2. Type into LDPlayer (Assumes Telegram is open on the 'Start' screen)
-        # Note: You might need to manually click the 'Start Messaging' button first
+        # 2. ADB: Type Number into Telegram
+        # This clears the field and types the new number
+        subprocess.run([ADB_PATH, "-s", device_id, "shell", "input", "keyevent", "KEYCODE_MOVE_END"])
+        for _ in range(15): subprocess.run([ADB_PATH, "-s", device_id, "shell", "input", "keyevent", "67"]) # Backspace
+        subprocess.run([ADB_PATH, "-s", device_id, "shell", "input", "text", phone])
+        subprocess.run([ADB_PATH, "-s", device_id, "shell", "input", "keyevent", "66"]) # Enter
+        
+        # 3. Get SMS Code
+        code = check_5sim_sms(order_id)
+        if code:
+            print(f"[!] Code Received: {code}")
+            subprocess.run([ADB_PATH, "-s", device_id, "shell", "input", "text", code])
+            print(f"[SUCCESS] {device_id} Logged In!")
+        else:
+            print(f"[-] No SMS received for {phone}. Moving to next unit.")
+            # Optional: Cancel order on 5sim to get refund
+            requests.get(f"https://5sim.net/v1/user/cancel/{order_id}", headers=HEADERS)
+
+if __name__ == "__main__":
+    run_factory()
         adb_type(device_id, phone)
         subprocess.run([ADB_PATH, "-s", device_id, "shell", "input", "keyevent", "66"]) # Enter
         
